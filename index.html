@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <style>
+      canvas {
+        border: 1px solid #000;
+        display: block;
+        margin: 20px auto;
+      }
+      .controls {
+        text-align: center;
+        margin: 10px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+      }
+      .button-group {
+        display: flex;
+        gap: 10px;
+      }
+      .slider-group {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        margin: 5px;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        min-width: 200px;
+      }
+      .slider-container {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .slider-container input[type="range"] {
+        width: 120px;
+      }
+      .slider-container input[type="number"] {
+        width: 60px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas" width="400" height="400"></canvas>
+    <div class="controls">
+      <div class="button-group">
+        <button onclick="rotateCounterClockwise()">↺ Rotate Left</button>
+        <button onclick="stopRotation()">Stop Rotation</button>
+        <button onclick="rotateClockwise()">Rotate Right ↻</button>
+        <button onclick="resetBall()">Reset Ball</button>
+      </div>
+      <div class="slider-group">
+        <div class="slider-container">
+          <label for="gravity">Gravity:</label>
+          <input
+            type="range"
+            id="gravitySlider"
+            min="0"
+            max="1"
+            step="0.01"
+            value="0.2"
+          />
+          <input
+            type="number"
+            id="gravityValue"
+            min="0"
+            max="1"
+            step="0.01"
+            value="0.2"
+          />
+        </div>
+        <div class="slider-container">
+          <label for="friction">Friction:</label>
+          <input
+            type="range"
+            id="frictionSlider"
+            min="0"
+            max="1"
+            step="0.01"
+            value="0.1"
+          />
+          <input
+            type="number"
+            id="frictionValue"
+            min="0"
+            max="1"
+            step="0.01"
+            value="0.1"
+          />
+        </div>
+        <div class="slider-container">
+          <label for="bounceEnergy">Bounce:</label>
+          <input
+            type="range"
+            id="bounceSlider"
+            min="0"
+            max="1"
+            step="0.01"
+            value="0.95"
+          />
+          <input
+            type="number"
+            id="bounceValue"
+            min="0"
+            max="1"
+            step="0.01"
+            value="0.95"
+          />
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+
+      // Configuration
+      const hexRadius = 150;
+      const ballRadius = 10;
+      let rotationSpeed = 0.01;
+      let currentRotation = 0;
+
+      // Ball physics
+      const ball = {
+        x: 0,
+        y: 0,
+        vx: 0,
+        vy: 0,
+        radius: ballRadius,
+      };
+
+      // Physics constants
+      let gravity;
+      let friction;
+      let bounceEnergy;
+
+      // Control functions
+      function rotateClockwise() {
+        rotationSpeed = 0.01;
+      }
+
+      function rotateCounterClockwise() {
+        rotationSpeed = -0.01;
+      }
+
+      function stopRotation() {
+        rotationSpeed = 0;
+      }
+
+      // Setup slider listeners
+      function setupSliderSync(sliderId, valueId, variable) {
+        const slider = document.getElementById(sliderId);
+        const value = document.getElementById(valueId);
+
+        slider.addEventListener("input", function () {
+          value.value = this.value;
+          window[variable] = parseFloat(this.value);
+        });
+
+        value.addEventListener("input", function () {
+          slider.value = this.value;
+          window[variable] = parseFloat(this.value);
+        });
+      }
+
+      setupSliderSync("gravitySlider", "gravityValue", "gravity");
+      setupSliderSync("frictionSlider", "frictionValue", "friction");
+      setupSliderSync("bounceSlider", "bounceValue", "bounceEnergy");
+
+      // Generate hexagon points
+      function getHexagonPoints(rotation) {
+        const points = [];
+        for (let i = 0; i < 6; i++) {
+          const angle = (Math.PI / 3) * i + rotation;
+          points.push({
+            x: canvas.width / 2 + hexRadius * Math.cos(angle),
+            y: canvas.height / 2 + hexRadius * Math.sin(angle),
+          });
+        }
+        return points;
+      }
+
+      // Draw hexagon
+      function drawHexagon(points) {
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+          ctx.lineTo(points[i].x, points[i].y);
+        }
+        ctx.closePath();
+        ctx.strokeStyle = "#000";
+        ctx.stroke();
+      }
+
+      // Draw ball
+      function drawBall() {
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+        ctx.fillStyle = "#ff4444";
+        ctx.fill();
+        ctx.closePath();
+      }
+
+      // Distance from point to line segment
+      function pointToLineDistance(x, y, x1, y1, x2, y2) {
+        const A = x - x1;
+        const B = y - y1;
+        const C = x2 - x1;
+        const D = y2 - y1;
+
+        const dot = A * C + B * D;
+        const len_sq = C * C + D * D;
+        let param = -1;
+
+        if (len_sq !== 0) {
+          param = dot / len_sq;
+        }
+
+        let xx, yy;
+
+        if (param < 0) {
+          xx = x1;
+          yy = y1;
+        } else if (param > 1) {
+          xx = x2;
+          yy = y2;
+        } else {
+          xx = x1 + param * C;
+          yy = y1 + param * D;
+        }
+
+        const dx = x - xx;
+        const dy = y - yy;
+
+        return {
+          distance: Math.sqrt(dx * dx + dy * dy),
+          closestX: xx,
+          closestY: yy,
+          normal:
+            len_sq !== 0
+              ? {
+                  x: -D / Math.sqrt(len_sq),
+                  y: C / Math.sqrt(len_sq),
+                }
+              : { x: 0, y: 0 },
+        };
+      }
+
+      // Check and handle collisions
+      function handleCollisions(hexPoints) {
+        const nextX = ball.x + ball.vx;
+        const nextY = ball.y + ball.vy;
+        let collisionOccurred = false;
+        let iterations = 0;
+        const MAX_ITERATIONS = 3;
+
+        while (iterations < MAX_ITERATIONS) {
+          let hasCollision = false;
+          let maxPenetration = 1;
+          let collisionResponse = null;
+
+          // Check all walls for collisions
+          for (let i = 0; i < hexPoints.length; i++) {
+            const p1 = hexPoints[i];
+            const p2 = hexPoints[(i + 1) % hexPoints.length];
+
+            const dist = pointToLineDistance(
+              ball.x,
+              ball.y,
+              p1.x,
+              p1.y,
+              p2.x,
+              p2.y
+            );
+
+            if (dist.distance < ball.radius) {
+              hasCollision = true;
+              const penetration = ball.radius - dist.distance;
+
+              if (penetration > maxPenetration) {
+                maxPenetration = penetration;
+                collisionResponse = {
+                  normal: dist.normal,
+                  penetration: penetration,
+                  point: { x: dist.closestX, y: dist.closestY },
+                };
+              }
+            }
+          }
+
+          if (!hasCollision) {
+            break;
+          }
+
+          // Resolve the deepest collision
+          if (collisionResponse) {
+            // Move ball out of collision
+            ball.x =
+              collisionResponse.point.x +
+              collisionResponse.normal.x * ball.radius;
+            ball.y =
+              collisionResponse.point.y +
+              collisionResponse.normal.y * ball.radius;
+
+            // Update velocity
+            const nx = collisionResponse.normal.x;
+            const ny = collisionResponse.normal.y;
+            const dot = ball.vx * nx + ball.vy * ny;
+
+            ball.vx = (ball.vx - 2 * dot * nx) * bounceEnergy;
+            ball.vy = (ball.vy - 2 * dot * ny) * bounceEnergy;
+
+            // Apply friction
+            const tangentX = -ny;
+            const tangentY = nx;
+            const tangentDot = ball.vx * tangentX + ball.vy * tangentY;
+            ball.vx = ball.vx - friction * tangentDot * tangentX;
+            ball.vy = ball.vy - friction * tangentDot * tangentY;
+
+            collisionOccurred = true;
+          }
+
+          iterations++;
+        }
+
+        if (!collisionOccurred) {
+          ball.x = nextX;
+          ball.y = nextY;
+        }
+      }
+
+      function resetBall() {
+        gravity = parseFloat(document.getElementById("gravityValue").value);
+        friction = parseFloat(document.getElementById("frictionValue").value);
+        bounceEnergy = parseFloat(document.getElementById("bounceValue").value);
+
+        ball.x = canvas.width / 2;
+        ball.y = canvas.height / 2;
+        ball.vx = 2;
+        ball.vy = 0;
+      }
+
+      // Animation loop
+      function animate() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        currentRotation += rotationSpeed;
+
+        const hexPoints = getHexagonPoints(currentRotation);
+        drawHexagon(hexPoints);
+
+        ball.vy += gravity;
+        handleCollisions(hexPoints);
+        drawBall();
+
+        requestAnimationFrame(animate);
+      }
+
+      // Initialize
+      resetBall();
+      animate();
+    </script>
+  </body>
+</html>
